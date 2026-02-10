@@ -113,7 +113,7 @@ class MainActivity : AppCompatActivity(),
         sendButton.setOnClickListener { sendMessage() }
         toggleVideoBtn.setOnClickListener { toggleVideo() }
         toggleAudioBtn.setOnClickListener { toggleAudio() }
-        switchCameraBtn.setOnClickListener { webRTCManager.switchCamera(this) }
+        switchCameraBtn.setOnClickListener { webRTCManager.switchCamera() }
 
         log("App started. PeerId: $peerId")
     }
