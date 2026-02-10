@@ -282,17 +282,25 @@ class MainActivity : AppCompatActivity(),
     override fun onIceStateChanged(state: PeerConnection.IceConnectionState) {
         mainHandler.post {
             when (state) {
+                PeerConnection.IceConnectionState.CHECKING -> {
+                    connectionStatus.text = "ICE checking..."
+                    log("ICE: Checking...")
+                }
                 PeerConnection.IceConnectionState.CONNECTED,
                 PeerConnection.IceConnectionState.COMPLETED -> {
                     iceRestartAttempts = 0
-                    log("ICE connected")
+                    log("ICE: Connected!")
                 }
-                PeerConnection.IceConnectionState.FAILED -> log("ICE failed")
+                PeerConnection.IceConnectionState.FAILED -> {
+                    log("ICE: Failed")
+                    connectionStatus.text = "ICE Failed"
+                }
                 PeerConnection.IceConnectionState.DISCONNECTED -> {
-                    sendButton.isEnabled = false
+                    log("ICE: Disconnected")
                     connectionStatus.text = "Disconnected"
+                    sendButton.isEnabled = false
                 }
-                else -> {}
+                else -> log("ICE: $state")
             }
         }
     }

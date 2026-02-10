@@ -42,9 +42,10 @@ class VideoWebRTCManager(
     private var localAudioTrack: AudioTrack? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
 
-    private val iceQueue = LinkedList<IceCandidate>()
+    private val iceQueue = Collections.synchronizedList(LinkedList<IceCandidate>())
     private val messageQueue = LinkedList<String>()
     private val isDataChannelReady = AtomicBoolean(false)
+    @Volatile
     private var hasRemoteDescription = false
     private var isCaller = false
     private var isClosing = false
@@ -64,7 +65,6 @@ class VideoWebRTCManager(
                 .createInitializationOptions()
         )
 
-        // FIXED: Removed JavaAudioDeviceModule - using default audio
         factory = PeerConnectionFactory.builder()
             .createPeerConnectionFactory()
     }
@@ -121,6 +121,7 @@ class VideoWebRTCManager(
         executor.execute {
             isCaller = caller
             isClosing = false
+            hasRemoteDescription = false
 
             if (pc != null) {
                 closeInternal()
@@ -334,38 +335,73 @@ class VideoWebRTCManager(
         }
     }
 
+    // FIXED: Properly synchronized remote description handling with immediate ICE flush
     fun setRemoteDescription(sdp: SessionDescription, onComplete: () -> Unit = {}) {
         executor.execute {
+            Log.d(tag, "Setting remote ${sdp.type}...")
             pc?.setRemoteDescription(object : SdpObserver {
                 override fun onSetSuccess() {
-                    Log.d(tag, "Remote ${sdp.type} set")
-                    hasRemoteDescription = true
+                    Log.d(tag, "Remote ${sdp.type} set successfully")
+
+                    // CRITICAL FIX: Set flag and flush ICE queue immediately on executor thread
+                    synchronized(this@VideoWebRTCManager) {
+                        hasRemoteDescription = true
+                    }
                     flushIceQueue()
+
                     mainHandler.post { onComplete() }
                 }
                 override fun onCreateSuccess(p0: SessionDescription?) {}
                 override fun onCreateFailure(p0: String?) {}
                 override fun onSetFailure(error: String?) {
+                    Log.e(tag, "Set remote ${sdp.type} failed: $error")
                     mainHandler.post { listener.onError("Set remote ${sdp.type} failed: $error") }
                 }
             }, sdp)
         }
     }
 
+    // FIXED: Thread-safe ICE candidate handling with proper queueing
     fun addIceCandidate(candidate: IceCandidate) {
         executor.execute {
-            if (hasRemoteDescription) {
-                pc?.addIceCandidate(candidate)
-            } else {
+            val shouldQueue = synchronized(this) {
+                if (hasRemoteDescription) {
+                    // Remote description is set, add immediately
+                    false
+                } else {
+                    // Remote description not set yet, queue it
+                    Log.d(tag, "Queuing ICE candidate (remote desc not ready)")
+                    true
+                }
+            }
+
+            if (shouldQueue) {
                 iceQueue.add(candidate)
+            } else {
+                val success = pc?.addIceCandidate(candidate) ?: false
+                if (!success) {
+                    Log.w(tag, "Failed to add ICE candidate immediately, re-queuing")
+                    iceQueue.add(candidate)
+                } else {
+                    Log.d(tag, "ICE candidate added successfully")
+                }
             }
         }
     }
 
     private fun flushIceQueue() {
+        Log.d(tag, "Flushing ${iceQueue.size} queued ICE candidates")
         while (iceQueue.isNotEmpty()) {
-            pc?.addIceCandidate(iceQueue.poll())
+            val candidate = iceQueue.removeFirstOrNull() ?: break
+            val success = pc?.addIceCandidate(candidate) ?: false
+            if (!success) {
+                Log.w(tag, "Failed to flush ICE candidate: ${candidate.sdpMid}")
+                // Re-add to queue to retry later
+                iceQueue.add(candidate)
+                break
+            }
         }
+        Log.d(tag, "ICE queue flushed, remaining: ${iceQueue.size}")
     }
 
     fun sendMessage(message: String): Boolean {
@@ -430,6 +466,9 @@ class VideoWebRTCManager(
 
     private fun closeInternal() {
         isDataChannelReady.set(false)
+        synchronized(this) {
+            hasRemoteDescription = false
+        }
 
         dataChannel?.close()
         dataChannel = null
@@ -457,7 +496,6 @@ class VideoWebRTCManager(
         pc?.close()
         pc = null
 
-        hasRemoteDescription = false
         iceQueue.clear()
         synchronized(messageQueue) { messageQueue.clear() }
         isClosing = false
