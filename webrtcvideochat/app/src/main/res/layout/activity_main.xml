@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rootLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#111"
+    android:fitsSystemWindows="true">
+
+    <!-- Video Section -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <org.webrtc.SurfaceViewRenderer
+            android:id="@+id/remoteVideoView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <org.webrtc.SurfaceViewRenderer
+            android:id="@+id/localVideoView"
+            android:layout_width="120dp"
+            android:layout_height="160dp"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="16dp"
+            android:background="#222" />
+
+        <TextView
+            android:id="@+id/connectionStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="8dp"
+            android:text="Status"
+            android:textColor="#00FF00"
+            android:textSize="14sp"
+            android:padding="8dp"
+            android:background="#AA000000" />
+    </FrameLayout>
+
+    <!-- Controls Section -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:background="#222">
+
+        <!-- Active Peers List - Original Vertical Style -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Active Peers:"
+            android:textColor="#ccc"
+            android:textSize="16sp"
+            android:paddingBottom="4dp" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="80dp"
+            android:background="#333"
+            android:padding="8dp">
+
+            <LinearLayout
+                android:id="@+id/peerList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+
+        <!-- Terminal Output -->
+        <ScrollView
+            android:id="@+id/scrollView"
+            android:layout_width="match_parent"
+            android:layout_height="100dp"
+            android:background="#111"
+            android:layout_marginTop="8dp"
+            android:padding="8dp">
+
+            <TextView
+                android:id="@+id/terminalOutput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#0f0"
+                android:textSize="12sp"
+                android:fontFamily="monospace"
+                android:scrollbars="vertical" />
+        </ScrollView>
+
+        <!-- Message Input -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <EditText
+                android:id="@+id/inputField"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Type a command..."
+                android:textColor="#0f0"
+                android:textColorHint="#666"
+                android:background="#333"
+                android:padding="12dp"
+                android:textSize="14sp"
+                android:inputType="text"
+                android:maxLines="3" />
+
+            <Button
+                android:id="@+id/sendButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Send"
+                android:layout_marginStart="8dp"
+                android:textColor="#0f0"
+                android:background="#444" />
+        </LinearLayout>
+
+        <!-- Media Controls -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/toggleVideoBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Video Off"
+                android:textSize="12sp"
+                android:layout_marginEnd="8dp" />
+
+            <Button
+                android:id="@+id/toggleAudioBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mute"
+                android:textSize="12sp"
+                android:layout_marginEnd="8dp" />
+
+            <Button
+                android:id="@+id/switchCameraBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Switch Cam"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+</LinearLayout>

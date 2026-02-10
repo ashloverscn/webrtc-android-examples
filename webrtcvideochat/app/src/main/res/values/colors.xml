@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="terminal_bg">#FF111111</color>
+    <color name="terminal_text">#FF00FF00</color>
+    <color name="status_online">#FF00FF00</color>
+    <color name="status_offline">#FF888888</color>
+    <color name="status_selected">#FFFFFF00</color>
+    <color name="button_bg">#FF333333</color>
+</resources>

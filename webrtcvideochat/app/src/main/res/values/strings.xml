@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">WebRTC Video Chat</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connecting">Connecting...</string>
+    <string name="status_connected">Connected</string>
+    <string name="hint_message">Type a message...</string>
+    <string name="send">Send</string>
+</resources>
