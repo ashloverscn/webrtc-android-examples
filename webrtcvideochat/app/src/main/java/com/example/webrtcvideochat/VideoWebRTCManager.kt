@@ -53,8 +53,10 @@ class VideoWebRTCManager(
     private var localVideoView: SurfaceViewRenderer? = null
     private var remoteVideoView: SurfaceViewRenderer? = null
     private var eglBase: EglBase? = null
+    private var context: Context? = null
 
     init {
+        this.context = context
         initializeFactory(context)
     }
 
@@ -78,6 +80,7 @@ class VideoWebRTCManager(
     ) {
         executor.execute {
             this.eglBase = eglBase
+            this.context = context
             localVideoView = localView
             remoteVideoView = remoteView
 
@@ -221,8 +224,8 @@ class VideoWebRTCManager(
                 override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
             })
 
-            localAudioTrack?.let { pc?.addTrack(it, listOf("stream_id")) }
-            localVideoTrack?.let { pc?.addTrack(it, listOf("stream_id")) }
+            // CRITICAL FIX: Add local tracks to PeerConnection AFTER it's created
+            addLocalTracksToPeerConnection()
 
             if (isCaller) {
                 val init = DataChannel.Init().apply {
@@ -237,6 +240,31 @@ class VideoWebRTCManager(
             Log.d(tag, "PeerConnection ready, caller=$isCaller")
             mainHandler.post { onCreated() }
         }
+    }
+
+    // CRITICAL FIX: Separate method to add tracks with proper transceiver configuration
+    private fun addLocalTracksToPeerConnection() {
+        Log.d(tag, "Adding local tracks to PeerConnection")
+
+        localAudioTrack?.let { track ->
+            Log.d(tag, "Adding local audio track")
+            val audioSender = pc?.addTrack(track, listOf("stream_id"))
+            if (audioSender == null) {
+                Log.e(tag, "Failed to add audio track")
+            } else {
+                Log.d(tag, "Audio track added successfully")
+            }
+        } ?: Log.w(tag, "Local audio track is null")
+
+        localVideoTrack?.let { track ->
+            Log.d(tag, "Adding local video track")
+            val videoSender = pc?.addTrack(track, listOf("stream_id"))
+            if (videoSender == null) {
+                Log.e(tag, "Failed to add video track")
+            } else {
+                Log.d(tag, "Video track added successfully")
+            }
+        } ?: Log.w(tag, "Local video track is null")
     }
 
     private fun setupDataChannel() {
@@ -335,7 +363,6 @@ class VideoWebRTCManager(
         }
     }
 
-    // FIXED: Properly synchronized remote description handling with immediate ICE flush
     fun setRemoteDescription(sdp: SessionDescription, onComplete: () -> Unit = {}) {
         executor.execute {
             Log.d(tag, "Setting remote ${sdp.type}...")
@@ -343,7 +370,6 @@ class VideoWebRTCManager(
                 override fun onSetSuccess() {
                     Log.d(tag, "Remote ${sdp.type} set successfully")
 
-                    // CRITICAL FIX: Set flag and flush ICE queue immediately on executor thread
                     synchronized(this@VideoWebRTCManager) {
                         hasRemoteDescription = true
                     }
@@ -361,15 +387,12 @@ class VideoWebRTCManager(
         }
     }
 
-    // FIXED: Thread-safe ICE candidate handling with proper queueing
     fun addIceCandidate(candidate: IceCandidate) {
         executor.execute {
             val shouldQueue = synchronized(this) {
                 if (hasRemoteDescription) {
-                    // Remote description is set, add immediately
                     false
                 } else {
-                    // Remote description not set yet, queue it
                     Log.d(tag, "Queuing ICE candidate (remote desc not ready)")
                     true
                 }
@@ -396,7 +419,6 @@ class VideoWebRTCManager(
             val success = pc?.addIceCandidate(candidate) ?: false
             if (!success) {
                 Log.w(tag, "Failed to flush ICE candidate: ${candidate.sdpMid}")
-                // Re-add to queue to retry later
                 iceQueue.add(candidate)
                 break
             }
