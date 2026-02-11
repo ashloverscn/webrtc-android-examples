@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.util.Log
 import android.view.WindowManager
 import android.widget.*
@@ -51,9 +50,6 @@ class MainActivity : AppCompatActivity(),
     private var isAudioEnabled = true
 
     private var eglBase: EglBase? = null
-
-    // Wake lock for keeping screen on during video calls
-    private var wakeLock: PowerManager.WakeLock? = null
 
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
@@ -221,6 +217,7 @@ class MainActivity : AppCompatActivity(),
         signalingClient.selectPeer(id)
         isCaller = true
 
+        // Disable send button until connection is established
         sendButton.isEnabled = false
 
         startConnectionTimeout()
@@ -239,6 +236,9 @@ class MainActivity : AppCompatActivity(),
         signalingClient.selectPeer(from)
         isCaller = false
         iceRestartAttempts = 0
+
+        // Disable send button until connection is established
+        sendButton.isEnabled = false
 
         startConnectionTimeout()
 
@@ -272,18 +272,20 @@ class MainActivity : AppCompatActivity(),
         log("Error: ${error.message}")
     }
 
+    // Enable send button for BOTH caller and callee when DataChannel opens
     override fun onDataChannelOpen() {
         cancelConnectionTimeout()
         mainHandler.post {
             sendButton.isEnabled = true
-            log("=== DataChannel Opened ===")
+            log("=== DataChannel Opened - Messaging Enabled ===")
         }
     }
 
+    // Disable send button for BOTH sides when DataChannel closes
     override fun onDataChannelClosed() {
         mainHandler.post {
             sendButton.isEnabled = false
-            log("=== DataChannel Closed ===")
+            log("=== DataChannel Closed - Messaging Disabled ===")
         }
     }
 
