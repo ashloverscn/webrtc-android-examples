@@ -40,29 +40,50 @@ class SignalingClient(
 
     fun sendOffer(sdp: String) {
         targetPeer?.let {
-            mqtt.send(it, "offer", JSONObject().apply {
+            val data = JSONObject().apply {
                 put("type", "offer")
                 put("sdp", sdp)
-            })
+            }
+            val msg = JSONObject().apply {
+                put("type", "offer")
+                put("from", this@SignalingClient.peerId)
+                put("to", it)
+                put("data", data)
+            }
+            mqtt.publish(msg)
         }
     }
 
     fun sendAnswer(sdp: String) {
         targetPeer?.let {
-            mqtt.send(it, "answer", JSONObject().apply {
+            val data = JSONObject().apply {
                 put("type", "answer")
                 put("sdp", sdp)
-            })
+            }
+            val msg = JSONObject().apply {
+                put("type", "answer")
+                put("from", this@SignalingClient.peerId)
+                put("to", it)
+                put("data", data)
+            }
+            mqtt.publish(msg)
         }
     }
 
     fun sendIceCandidate(candidate: org.webrtc.IceCandidate) {
         targetPeer?.let {
-            mqtt.send(it, "ice", JSONObject().apply {
+            val data = JSONObject().apply {
+                put("candidate", candidate.sdp)
                 put("sdpMid", candidate.sdpMid)
                 put("sdpMLineIndex", candidate.sdpMLineIndex)
-                put("candidate", candidate.sdp)
-            })
+            }
+            val msg = JSONObject().apply {
+                put("type", "ice")
+                put("from", this@SignalingClient.peerId)
+                put("to", it)
+                put("data", data)
+            }
+            mqtt.publish(msg)
         }
     }
 
@@ -76,6 +97,7 @@ class SignalingClient(
             return
         }
 
+        // Only process messages meant for us
         if (to != peerId) return
 
         when (type) {

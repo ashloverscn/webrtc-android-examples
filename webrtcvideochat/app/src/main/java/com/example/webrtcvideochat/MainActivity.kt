@@ -17,19 +17,19 @@ import org.webrtc.SessionDescription
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 import org.webrtc.AudioTrack
+import org.webrtc.RendererCommon
 
 class MainActivity : AppCompatActivity(),
     SignalingClient.SignalingListener,
     VideoWebRTCManager.WebRTCListener {
 
-    private lateinit var localVideoView: SurfaceViewRenderer
     private lateinit var remoteVideoView: SurfaceViewRenderer
     private lateinit var terminalOutput: TextView
     private lateinit var inputField: EditText
     private lateinit var sendButton: Button
     private lateinit var peerListLayout: LinearLayout
-    private lateinit var connectionStatus: TextView
-    private lateinit var scrollView: ScrollView
+    private lateinit var peerListScroll: ScrollView
+    private lateinit var terminalScroll: ScrollView
     private lateinit var toggleVideoBtn: Button
     private lateinit var toggleAudioBtn: Button
     private lateinit var switchCameraBtn: Button
@@ -98,16 +98,14 @@ class MainActivity : AppCompatActivity(),
 
         eglBase = EglBase.create()
 
-        localVideoView.init(eglBase?.eglBaseContext, null)
         remoteVideoView.init(eglBase?.eglBaseContext, null)
-        localVideoView.setZOrderMediaOverlay(true)
-        localVideoView.setEnableHardwareScaler(true)
         remoteVideoView.setEnableHardwareScaler(true)
+        remoteVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
 
         signalingClient = SignalingClient(this, peerId, this)
         webRTCManager = VideoWebRTCManager(this, this)
 
-        webRTCManager.initializeVideo(this, localVideoView, remoteVideoView, eglBase!!, true)
+        webRTCManager.initializeVideo(this, null, remoteVideoView, eglBase!!, true)
         signalingClient.connect()
 
         sendButton.setOnClickListener { sendMessage() }
@@ -115,18 +113,18 @@ class MainActivity : AppCompatActivity(),
         toggleAudioBtn.setOnClickListener { toggleAudio() }
         switchCameraBtn.setOnClickListener { webRTCManager.switchCamera() }
 
-        log("App started. PeerId: $peerId")
+        log("Ready - PeerId: $peerId")
+        log("Click a peer to call")
     }
 
     private fun bindViews() {
-        localVideoView = findViewById(R.id.localVideoView)
         remoteVideoView = findViewById(R.id.remoteVideoView)
         terminalOutput = findViewById(R.id.terminalOutput)
+        terminalScroll = findViewById(R.id.terminalScroll)
+        peerListScroll = findViewById(R.id.peerListScroll)
         inputField = findViewById(R.id.inputField)
         sendButton = findViewById(R.id.sendButton)
         peerListLayout = findViewById(R.id.peerList)
-        connectionStatus = findViewById(R.id.connectionStatus)
-        scrollView = findViewById(R.id.scrollView)
         toggleVideoBtn = findViewById(R.id.toggleVideoBtn)
         toggleAudioBtn = findViewById(R.id.toggleAudioBtn)
         switchCameraBtn = findViewById(R.id.switchCameraBtn)
@@ -136,7 +134,7 @@ class MainActivity : AppCompatActivity(),
         Log.d(tag, message)
         mainHandler.post {
             terminalOutput.append(message + "\n")
-            scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
+            terminalScroll.post { terminalScroll.fullScroll(ScrollView.FOCUS_DOWN) }
         }
     }
 
@@ -155,6 +153,8 @@ class MainActivity : AppCompatActivity(),
                             }
                         }
                     }
+                } else {
+                    log("Connection failed")
                 }
             }
         }, 15000)
@@ -182,36 +182,40 @@ class MainActivity : AppCompatActivity(),
             peerListLayout.removeAllViews()
             peers.forEach { (id, info) ->
                 val tv = TextView(this).apply {
-                    text = if (id == peerId) "[me]: $id" else "[online]: $id"
+                    text = if (id == peerId) "[me]:$id" else "[online]:$id"
                     setTextColor(if (id == peerId) 0xFF888888.toInt() else 0xFF00FF00.toInt())
                     textSize = 14f
-                    setPadding(8, 4, 8, 4)  // Compact vertical spacing
+                    setPadding(8, 4, 8, 4)
                     setOnClickListener { selectPeer(id) }
                 }
                 if (id == targetPeerId) {
                     tv.setTextColor(0xFFFFFF00.toInt())
-                    tv.text = "[selected]: $id"
+                    tv.text = "[selected]:$id"
                 }
                 peerListLayout.addView(tv)
             }
+            peerListScroll.post { peerListScroll.fullScroll(ScrollView.FOCUS_DOWN) }
         }
     }
 
     private fun selectPeer(id: String) {
-        if (id == peerId) return
+        if (id == peerId) {
+            Toast.makeText(this, "Cannot call yourself", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        log("Calling $id...")
         webRTCManager.close()
         iceRestartAttempts = 0
 
         targetPeerId = id
-        targetPeerId?.let { signalingClient.selectPeer(it) }
+        signalingClient.selectPeer(id)
         isCaller = true
 
-        connectionStatus.text = "Calling $id..."
         sendButton.isEnabled = false
-        log("=======================")
-        log("Calling $id...")
 
         startConnectionTimeout()
+
         webRTCManager.createConnection(true) {
             webRTCManager.createOffer { sdp ->
                 signalingClient.sendOffer(sdp.description)
@@ -221,12 +225,12 @@ class MainActivity : AppCompatActivity(),
 
     override fun onOfferReceived(from: String, sdp: String) {
         log("Incoming call from $from")
+
         targetPeerId = from
-        targetPeerId?.let { signalingClient.selectPeer(it) }
+        signalingClient.selectPeer(from)
         isCaller = false
         iceRestartAttempts = 0
 
-        connectionStatus.text = "Incoming call..."
         startConnectionTimeout()
 
         webRTCManager.createConnection(false) {
@@ -252,7 +256,7 @@ class MainActivity : AppCompatActivity(),
     }
 
     override fun onConnected() {
-        log("Signaling connected")
+        log("Online")
     }
 
     override fun onError(error: Throwable) {
@@ -263,44 +267,43 @@ class MainActivity : AppCompatActivity(),
         cancelConnectionTimeout()
         mainHandler.post {
             sendButton.isEnabled = true
-            connectionStatus.text = "Connected"
-            log("DataChannel open")
+            log("=== DataChannel Opened ===")
         }
     }
 
     override fun onDataChannelClosed() {
         mainHandler.post {
             sendButton.isEnabled = false
-            connectionStatus.text = "Disconnected"
+            log("=== DataChannel Closed ===")
         }
     }
 
     override fun onMessageReceived(message: String) {
-        log("< $message")
+        log("> $message")
     }
 
     override fun onIceStateChanged(state: PeerConnection.IceConnectionState) {
         mainHandler.post {
             when (state) {
-                PeerConnection.IceConnectionState.CHECKING -> {
-                    connectionStatus.text = "ICE checking..."
-                    log("ICE: Checking...")
+                PeerConnection.IceConnectionState.CONNECTED -> {
+                    iceRestartAttempts = 0
+                    log("ICE Connected")
                 }
-                PeerConnection.IceConnectionState.CONNECTED,
                 PeerConnection.IceConnectionState.COMPLETED -> {
                     iceRestartAttempts = 0
-                    log("ICE: Connected!")
+                    log("ICE Completed")
                 }
                 PeerConnection.IceConnectionState.FAILED -> {
-                    log("ICE: Failed")
-                    connectionStatus.text = "ICE Failed"
+                    log("ICE Failed")
+                    if (!isCaller && iceRestartAttempts < 3) {
+                        iceRestartAttempts++
+                    }
                 }
                 PeerConnection.IceConnectionState.DISCONNECTED -> {
-                    log("ICE: Disconnected")
-                    connectionStatus.text = "Disconnected"
+                    log("ICE Disconnected")
                     sendButton.isEnabled = false
                 }
-                else -> log("ICE: $state")
+                else -> {}
             }
         }
     }
@@ -310,39 +313,39 @@ class MainActivity : AppCompatActivity(),
     }
 
     override fun onError(error: String) {
-        log("WebRTC Error: $error")
+        log("Error: $error")
     }
 
     override fun onLocalVideoTrack(track: VideoTrack) {
-        log("Local video ready")
+        // Local video not displayed
     }
 
     override fun onRemoteVideoTrack(track: VideoTrack) {
-        log("Remote video received")
+        log("Video started")
     }
 
     override fun onRemoteAudioTrack(track: AudioTrack) {
-        log("Remote audio received")
+        // Audio started
     }
 
     private fun sendMessage() {
-        val msg = inputField.text.toString()
+        val msg = inputField.text.toString().trim()
         if (msg.isEmpty()) return
+
         if (webRTCManager.sendMessage(msg)) {
-            log("> $msg")
+            log("< $msg")
             inputField.text.clear()
         } else {
-            log("Queued")
+            log("Send failed")
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         cancelConnectionTimeout()
-        localVideoView.release()
         remoteVideoView.release()
         eglBase?.release()
-        webRTCManager.close()
+        webRTCManager.cleanup()
         signalingClient.destroy()
     }
 }
