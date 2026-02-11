@@ -6,6 +6,7 @@
     android:orientation="vertical"
     android:background="#FFFFFF"
     android:paddingTop="24dp"
+    android:paddingBottom="48dp"
     tools:context=".MainActivity">
 
     <!-- Remote Video -->
@@ -63,13 +64,14 @@
 
     </ScrollView>
 
-    <!-- Controls -->
+    <!-- Controls with padding under the three buttons -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:padding="8dp">
+        android:padding="8dp"
+        android:paddingBottom="16dp">
 
         <Button
             android:id="@+id/toggleVideoBtn"
@@ -110,6 +112,8 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:hint="Type message..."
+            android:textColor="#000000"
+            android:textColorHint="#666666"
             android:background="#FFFFFF"
             android:padding="12dp"
             android:inputType="text" />
@@ -123,10 +127,5 @@
             android:enabled="false" />
 
     </LinearLayout>
-
-    <!-- Bottom Space -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="48dp" />
 
 </LinearLayout>
