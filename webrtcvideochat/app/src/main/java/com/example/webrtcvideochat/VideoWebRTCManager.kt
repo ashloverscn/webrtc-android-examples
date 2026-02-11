@@ -146,7 +146,8 @@ class VideoWebRTCManager(
 
                 override fun onDataChannel(dc: DataChannel?) {
                     dc?.let {
-                        Log.d(tag, "onDataChannel: ${it.label()}")
+                        Log.d(tag, "onDataChannel received: ${it.label()}, state: ${it.state()}")
+                        // CRITICAL: Handle on main thread to ensure proper setup
                         mainHandler.post {
                             dataChannel = it
                             setupDataChannel()
@@ -188,8 +189,9 @@ class VideoWebRTCManager(
             if (isCaller) {
                 val init = DataChannel.Init().apply { ordered = true }
                 dataChannel = pc?.createDataChannel("terminal", init)
-                Log.d(tag, "DataChannel created: ${dataChannel?.label()}")
-                setupDataChannel()
+                Log.d(tag, "DataChannel created by caller: ${dataChannel?.label()}")
+                // CRITICAL: Setup on main thread for consistency
+                mainHandler.post { setupDataChannel() }
             }
 
             Log.d(tag, "PeerConnection ready, caller=$isCaller")
@@ -199,17 +201,22 @@ class VideoWebRTCManager(
 
     private fun setupDataChannel() {
         dataChannel?.let { dc ->
+            Log.d(tag, "Setting up DataChannel observer, current state: ${dc.state()}")
+
             dc.registerObserver(object : DataChannel.Observer {
                 override fun onStateChange() {
                     val state = dc.state()
-                    Log.d(tag, "DataChannel: $state")
+                    Log.d(tag, "DataChannel state changed to: $state")
 
                     when (state) {
                         DataChannel.State.OPEN -> {
-                            isDataChannelReady = true
-                            mainHandler.post {
-                                listener.onDataChannelOpen()
-                                flushMessageQueue()
+                            if (!isDataChannelReady) {
+                                isDataChannelReady = true
+                                mainHandler.post {
+                                    Log.d(tag, "Firing onDataChannelOpen from state change")
+                                    listener.onDataChannelOpen()
+                                    flushMessageQueue()
+                                }
                             }
                         }
                         DataChannel.State.CLOSED, DataChannel.State.CLOSING -> {
@@ -231,7 +238,18 @@ class VideoWebRTCManager(
 
                 override fun onBufferedAmountChange(p0: Long) {}
             })
-        }
+
+            // CRITICAL: Check if already open (essential for callee side)
+            // The DataChannel might already be OPEN by the time we register the observer
+            if (dc.state() == DataChannel.State.OPEN && !isDataChannelReady) {
+                Log.d(tag, "DataChannel already open, firing callback immediately")
+                isDataChannelReady = true
+                mainHandler.post {
+                    listener.onDataChannelOpen()
+                    flushMessageQueue()
+                }
+            }
+        } ?: Log.e(tag, "setupDataChannel called but dataChannel is null!")
     }
 
     fun createOffer(onSuccess: (SessionDescription) -> Unit) {
