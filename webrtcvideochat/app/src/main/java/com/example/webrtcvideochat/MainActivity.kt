@@ -5,7 +5,9 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
+import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -50,6 +52,9 @@ class MainActivity : AppCompatActivity(),
 
     private var eglBase: EglBase? = null
 
+    // Wake lock for keeping screen on during video calls
+    private var wakeLock: PowerManager.WakeLock? = null
+
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
         private val REQUIRED_PERMISSIONS = arrayOf(
@@ -60,6 +65,10 @@ class MainActivity : AppCompatActivity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Keep screen on while this activity is visible
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         setContentView(R.layout.activity_main)
 
         if (checkPermissions()) {
