@@ -39,8 +39,9 @@ class VideoWebRTCManager(
     private var audioSource: AudioSource? = null
     private var localVideoTrack: VideoTrack? = null
     private var localAudioTrack: AudioTrack? = null
+    private var localRenderer: SurfaceViewRenderer? = null
     private var remoteRenderer: SurfaceViewRenderer? = null
-    private var eglBase: EglBase? = null
+    private var sharedEglBase: EglBase? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
 
     private val iceQueue = LinkedList<IceCandidate>()
@@ -56,8 +57,9 @@ class VideoWebRTCManager(
         egl: EglBase,
         enableVideo: Boolean
     ) {
-        eglBase = egl
-        remoteRenderer = remoteView
+        this.sharedEglBase = egl
+        this.localRenderer = localView
+        this.remoteRenderer = remoteView
 
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context)
@@ -79,26 +81,47 @@ class VideoWebRTCManager(
     }
 
     private fun startLocalMedia() {
-        try {
-            videoCapturer = createCameraCapturer()
-            videoSource = factory!!.createVideoSource(false)
-            surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase!!.eglBaseContext)
-            videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
-            videoCapturer!!.startCapture(1280, 720, 30)
+        executor.execute {
+            try {
+                videoCapturer = createCameraCapturer()
+                videoSource = factory!!.createVideoSource(false)
+                surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", sharedEglBase!!.eglBaseContext)
+                videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
+                videoCapturer!!.startCapture(1280, 720, 30)
 
-            localVideoTrack = factory!!.createVideoTrack("VIDEO_LOCAL", videoSource)
-            localVideoTrack!!.setEnabled(true)
-            listener.onLocalVideoTrack(localVideoTrack!!)
+                localVideoTrack = factory!!.createVideoTrack("VIDEO_LOCAL", videoSource)
+                localVideoTrack!!.setEnabled(true)
 
-            audioSource = factory!!.createAudioSource(MediaConstraints())
-            localAudioTrack = factory!!.createAudioTrack("AUDIO_LOCAL", audioSource)
-            localAudioTrack!!.setEnabled(true)
+                // Add sink on main thread
+                mainHandler.post {
+                    attachLocalVideoSink()
+                    listener.onLocalVideoTrack(localVideoTrack!!)
+                }
 
-            Log.d(tag, "Local media started")
-        } catch (e: Exception) {
-            Log.e(tag, "Error starting local media", e)
-            listener.onError("Failed to start camera: ${e.message}")
+                audioSource = factory!!.createAudioSource(MediaConstraints())
+                localAudioTrack = factory!!.createAudioTrack("AUDIO_LOCAL", audioSource)
+                localAudioTrack!!.setEnabled(true)
+
+                Log.d(tag, "Local media started successfully")
+            } catch (e: Exception) {
+                Log.e(tag, "Error starting local media", e)
+                mainHandler.post { listener.onError("Failed to start camera: ${e.message}") }
+            }
         }
+    }
+
+    // Separate method to attach sink - can be called multiple times if needed
+    fun attachLocalVideoSink() {
+        localRenderer?.let { renderer ->
+            localVideoTrack?.let { track ->
+                try {
+                    track.addSink(renderer)
+                    Log.d(tag, "Local video sink attached successfully")
+                } catch (e: Exception) {
+                    Log.e(tag, "Failed to attach local video sink", e)
+                }
+            } ?: Log.e(tag, "Local video track is null!")
+        } ?: Log.e(tag, "Local renderer is null!")
     }
 
     fun createConnection(caller: Boolean, onCreated: () -> Unit = {}) {
@@ -147,7 +170,6 @@ class VideoWebRTCManager(
                 override fun onDataChannel(dc: DataChannel?) {
                     dc?.let {
                         Log.d(tag, "onDataChannel received: ${it.label()}, state: ${it.state()}")
-                        // CRITICAL: Handle on main thread to ensure proper setup
                         mainHandler.post {
                             dataChannel = it
                             setupDataChannel()
@@ -161,8 +183,10 @@ class VideoWebRTCManager(
                             is VideoTrack -> {
                                 Log.d(tag, "Remote video track received")
                                 track.setEnabled(true)
-                                remoteRenderer?.let { track.addSink(it) }
-                                mainHandler.post { listener.onRemoteVideoTrack(track) }
+                                mainHandler.post {
+                                    remoteRenderer?.let { track.addSink(it) }
+                                    listener.onRemoteVideoTrack(track)
+                                }
                             }
                             is AudioTrack -> {
                                 Log.d(tag, "Remote audio track received")
@@ -190,7 +214,6 @@ class VideoWebRTCManager(
                 val init = DataChannel.Init().apply { ordered = true }
                 dataChannel = pc?.createDataChannel("terminal", init)
                 Log.d(tag, "DataChannel created by caller: ${dataChannel?.label()}")
-                // CRITICAL: Setup on main thread for consistency
                 mainHandler.post { setupDataChannel() }
             }
 
@@ -239,8 +262,6 @@ class VideoWebRTCManager(
                 override fun onBufferedAmountChange(p0: Long) {}
             })
 
-            // CRITICAL: Check if already open (essential for callee side)
-            // The DataChannel might already be OPEN by the time we register the observer
             if (dc.state() == DataChannel.State.OPEN && !isDataChannelReady) {
                 Log.d(tag, "DataChannel already open, firing callback immediately")
                 isDataChannelReady = true
@@ -358,6 +379,9 @@ class VideoWebRTCManager(
 
     fun toggleVideo(enable: Boolean) {
         localVideoTrack?.setEnabled(enable)
+        mainHandler.post {
+            localRenderer?.visibility = if (enable) android.view.View.VISIBLE else android.view.View.INVISIBLE
+        }
     }
 
     fun toggleAudio(enable: Boolean) {
@@ -397,20 +421,26 @@ class VideoWebRTCManager(
 
     fun cleanup() {
         close()
-        localVideoTrack?.dispose()
-        localVideoTrack = null
-        localAudioTrack?.dispose()
-        localAudioTrack = null
-        videoCapturer?.stopCapture()
-        videoCapturer?.dispose()
-        videoCapturer = null
-        surfaceTextureHelper?.dispose()
-        surfaceTextureHelper = null
-        videoSource?.dispose()
-        videoSource = null
-        audioSource?.dispose()
-        audioSource = null
-        factory?.dispose()
-        factory = null
+        executor.execute {
+            localVideoTrack?.removeSink(localRenderer)
+            localVideoTrack?.dispose()
+            localVideoTrack = null
+            localAudioTrack?.dispose()
+            localAudioTrack = null
+            videoCapturer?.stopCapture()
+            videoCapturer?.dispose()
+            videoCapturer = null
+            surfaceTextureHelper?.dispose()
+            surfaceTextureHelper = null
+            videoSource?.dispose()
+            videoSource = null
+            audioSource?.dispose()
+            audioSource = null
+            factory?.dispose()
+            factory = null
+            sharedEglBase = null
+            localRenderer = null
+            remoteRenderer = null
+        }
     }
 }
