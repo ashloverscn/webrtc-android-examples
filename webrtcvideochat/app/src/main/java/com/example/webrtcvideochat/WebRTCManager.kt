@@ -40,10 +40,9 @@ class PeerRegistry {
     private val listeners = mutableListOf<(Map<String, PeerStatus>) -> Unit>()
     private val handler = Handler(Looper.getMainLooper())
 
-    // Timing constants matching HTML client exactly
     companion object {
-        const val OFFLINE_THRESHOLD = 1000L  // Mark offline after 1 second
-        const val EXPIRE_THRESHOLD = 5000L   // Remove after 5 seconds
+        const val OFFLINE_THRESHOLD = 3500L   // Mark offline after 3.5 seconds (3.5x presence interval)
+        const val EXPIRE_THRESHOLD = 12000L   // Remove after 12 seconds
     }
 
     fun addListener(listener: (Map<String, PeerStatus>) -> Unit) {
@@ -52,7 +51,7 @@ class PeerRegistry {
 
     fun update(peerId: String) {
         val existing = peers[peerId]
-        val wasOnline = existing?.isOnline ?: false
+        val wasOffline = existing?.isOnline == false
 
         peers[peerId] = PeerStatus(
             id = peerId,
@@ -60,8 +59,8 @@ class PeerRegistry {
             isOnline = true
         )
 
-        // Notify if new peer or was offline
-        if (!wasOnline) {
+        // Only notify if new peer or was explicitly offline (prevents blinking)
+        if (existing == null || wasOffline) {
             notifyListeners()
         }
     }
@@ -77,13 +76,11 @@ class PeerRegistry {
 
             when {
                 elapsed > EXPIRE_THRESHOLD -> {
-                    // Expired - remove completely (like HTML)
                     iterator.remove()
                     changed = true
                     Log.d("PeerRegistry", "Expired and removed: ${entry.key}")
                 }
                 elapsed > OFFLINE_THRESHOLD && entry.value.isOnline -> {
-                    // Mark offline (like HTML "disconnected")
                     entry.value.isOnline = false
                     changed = true
                     Log.d("PeerRegistry", "Marked offline: ${entry.key}")
@@ -100,13 +97,13 @@ class PeerRegistry {
     }
 
     fun startCleanup() {
-        // Run every 500ms for responsive updates
+        // Run every 1000ms for stable presence detection
         handler.postDelayed(object : Runnable {
             override fun run() {
                 cleanup()
-                handler.postDelayed(this, 500)
+                handler.postDelayed(this, 1000)
             }
-        }, 500)
+        }, 1000)
     }
 }
 
@@ -274,7 +271,6 @@ class WebRTCManager(
                 mqttClient?.subscribe(mqttConfig.topic)
                 isMqttConnected = true
 
-                // Start presence loop immediately (every 1000ms like HTML)
                 startPresenceLoop()
 
                 mainHandler.post { listener.onConnected() }
@@ -299,7 +295,7 @@ class WebRTCManager(
                     publish(presence)
                     Log.d(tag, "Sent presence")
                 }
-                presenceHandler.postDelayed(this, 1000) // Match HTML: 1000ms
+                presenceHandler.postDelayed(this, 1000)
             }
         })
     }
