@@ -177,13 +177,26 @@ class MainActivity : AppCompatActivity(), WebRTCManager.WebRTCListener {
 
     // ==================== WEBRTC LISTENER CALLBACKS ====================
 
-    override fun onPeerListUpdated(peers: Map<String, PeerInfo>) {
+    override fun onPeerListUpdated(peers: Map<String, PeerInfo>, myPeerId: String) {
         mainHandler.post {
             peerListLayout.removeAllViews()
+
+            // Add "me" at the top first
+            val meTv = TextView(this).apply {
+                text = "[me]:$myPeerId"
+                setTextColor(0xFF888888.toInt())
+                textSize = 14f
+                setPadding(8, 4, 8, 4)
+            }
+            peerListLayout.addView(meTv)
+
+            // Add other peers below
             peers.forEach { (id, info) ->
+                if (id == myPeerId) return@forEach // Skip self, already added at top
+
                 val tv = TextView(this).apply {
-                    text = if (id == webRTCManager.getPeerId()) "[me]:$id" else "[online]:$id"
-                    setTextColor(if (id == webRTCManager.getPeerId()) 0xFF888888.toInt() else 0xFF00FF00.toInt())
+                    text = "[online]:$id"
+                    setTextColor(0xFF00FF00.toInt())
                     textSize = 14f
                     setPadding(8, 4, 8, 4)
                     setOnClickListener { selectPeer(id) }
