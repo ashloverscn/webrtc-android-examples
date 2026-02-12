@@ -35,7 +35,7 @@ class WebRTCManager(
     private val listener: WebRTCListener
 ) {
     interface WebRTCListener {
-        fun onPeerListUpdated(peers: Map<String, PeerInfo>)
+        fun onPeerListUpdated(peers: Map<String, PeerInfo>, myPeerId: String)
         fun onOfferReceived(from: String, sdp: String)
         fun onAnswerReceived(from: String, sdp: String)
         fun onIceCandidateReceived(from: String, candidate: IceCandidateData)
@@ -60,7 +60,7 @@ class WebRTCManager(
     // Peer Registry
     private val registry = PeerRegistry()
     private var targetPeer: String? = null
-    private val peerId = "android_" + (100000..999999).random()
+    private val peerId = "peer_" + generateRandomAlphanumeric(6)
 
     // WebRTC
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -89,12 +89,21 @@ class WebRTCManager(
 
     fun getPeerId(): String = peerId
 
+    private fun generateRandomAlphanumeric(length: Int): String {
+        val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+        return (1..length)
+            .map { chars.random() }
+            .joinToString("")
+    }
+
     fun initialize(remoteView: SurfaceViewRenderer, egl: EglBase, config: MqttConfig) {
         this.remoteRenderer = remoteView
         this.eglBase = egl
         this.mqttConfig = config
 
-        registry.addListener { listener.onPeerListUpdated(it) }
+        registry.addListener { peers ->
+            mainHandler.post { listener.onPeerListUpdated(peers, peerId) }
+        }
         registry.startCleanup()
 
         PeerConnectionFactory.initialize(
