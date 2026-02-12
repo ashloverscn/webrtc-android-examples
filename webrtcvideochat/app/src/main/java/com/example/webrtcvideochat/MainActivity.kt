@@ -1,7 +1,10 @@
 package com.example.webrtcvideochat
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -18,11 +21,8 @@ import org.webrtc.SessionDescription
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 import org.webrtc.AudioTrack
-import org.webrtc.RendererCommon
 
-class MainActivity : AppCompatActivity(),
-    SignalingClient.SignalingListener,
-    VideoWebRTCManager.WebRTCListener {
+class MainActivity : AppCompatActivity(), WebRTCManager.WebRTCListener {
 
     private lateinit var remoteVideoView: SurfaceViewRenderer
     private lateinit var terminalOutput: TextView
@@ -35,10 +35,8 @@ class MainActivity : AppCompatActivity(),
     private lateinit var toggleAudioBtn: Button
     private lateinit var switchCameraBtn: Button
 
-    private lateinit var signalingClient: SignalingClient
-    private lateinit var webRTCManager: VideoWebRTCManager
+    private lateinit var webRTCManager: WebRTCManager
 
-    private val peerId = "peer_" + (100000..999999).random()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val tag = "MainActivity"
 
@@ -51,6 +49,19 @@ class MainActivity : AppCompatActivity(),
 
     private var eglBase: EglBase? = null
 
+    // Network monitoring
+    private val networkCheckHandler = Handler(Looper.getMainLooper())
+    private var wasNetworkAvailable = false
+    private val networkCheckInterval = 3000L
+
+    // MQTT Configuration - MODIFY THESE
+    private val mqttConfig = MqttConfig(
+        brokerUrl = "ssl://e5122a5328ea4986a0295fa6e037655a.s2.eu.hivemq.cloud:8883",
+        username = "admin",
+        password = "admin1234S",
+        topic = "webrtc/signaling"
+    )
+
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
         private val REQUIRED_PERMISSIONS = arrayOf(
@@ -61,10 +72,7 @@ class MainActivity : AppCompatActivity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Keep screen on while this activity is visible
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
         setContentView(R.layout.activity_main)
 
         if (checkPermissions()) {
@@ -105,20 +113,24 @@ class MainActivity : AppCompatActivity(),
 
         remoteVideoView.init(eglBase?.eglBaseContext, null)
         remoteVideoView.setEnableHardwareScaler(true)
-        remoteVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
 
-        signalingClient = SignalingClient(this, peerId, this)
-        webRTCManager = VideoWebRTCManager(this, this)
+        webRTCManager = WebRTCManager(this, this)
+        webRTCManager.initialize(remoteVideoView, eglBase!!, mqttConfig)
 
-        webRTCManager.initializeVideo(this, null, remoteVideoView, eglBase!!, true)
-        signalingClient.connect()
+        startNetworkMonitoring()
+
+        if (isInternetAvailable()) {
+            webRTCManager.connect()
+        } else {
+            log("Waiting for internet connection...")
+        }
 
         sendButton.setOnClickListener { sendMessage() }
         toggleVideoBtn.setOnClickListener { toggleVideo() }
         toggleAudioBtn.setOnClickListener { toggleAudio() }
         switchCameraBtn.setOnClickListener { webRTCManager.switchCamera() }
 
-        log("Ready - PeerId: $peerId")
+        log("Ready - PeerId: ${webRTCManager.getPeerId()}")
         log("Click a peer to call")
     }
 
@@ -135,60 +147,43 @@ class MainActivity : AppCompatActivity(),
         switchCameraBtn = findViewById(R.id.switchCameraBtn)
     }
 
-    private fun log(message: String) {
-        Log.d(tag, message)
-        mainHandler.post {
-            terminalOutput.append(message + "\n")
-            terminalScroll.post { terminalScroll.fullScroll(ScrollView.FOCUS_DOWN) }
-        }
+    // ==================== NETWORK MONITORING ====================
+
+    private fun isInternetAvailable(): Boolean {
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    private fun startConnectionTimeout() {
-        connectionTimeoutHandler?.removeCallbacksAndMessages(null)
-        connectionTimeoutHandler = Handler(Looper.getMainLooper())
-        connectionTimeoutHandler?.postDelayed({
-            if (!sendButton.isEnabled) {
-                log("Connection timeout")
-                if (iceRestartAttempts < 3) {
-                    iceRestartAttempts++
-                    webRTCManager.createConnection(isCaller) {
-                        if (isCaller) {
-                            webRTCManager.createOffer { sdp ->
-                                signalingClient.sendOffer(sdp.description)
-                            }
-                        }
-                    }
-                } else {
-                    log("Connection failed")
+    private fun startNetworkMonitoring() {
+        networkCheckHandler.post(object : Runnable {
+            override fun run() {
+                val isNetworkAvailable = isInternetAvailable()
+
+                if (isNetworkAvailable && !wasNetworkAvailable) {
+                    log("Internet connection restored")
+                    webRTCManager.connect()
+                } else if (!isNetworkAvailable && wasNetworkAvailable) {
+                    log("Internet connection lost")
                 }
+
+                wasNetworkAvailable = isNetworkAvailable
+                networkCheckHandler.postDelayed(this, networkCheckInterval)
             }
-        }, 15000)
+        })
     }
 
-    private fun cancelConnectionTimeout() {
-        connectionTimeoutHandler?.removeCallbacksAndMessages(null)
-        iceRestartAttempts = 0
-    }
+    // ==================== WEBRTC LISTENER CALLBACKS ====================
 
-    private fun toggleVideo() {
-        isVideoEnabled = !isVideoEnabled
-        webRTCManager.toggleVideo(isVideoEnabled)
-        toggleVideoBtn.text = if (isVideoEnabled) "Video Off" else "Video On"
-    }
-
-    private fun toggleAudio() {
-        isAudioEnabled = !isAudioEnabled
-        webRTCManager.toggleAudio(isAudioEnabled)
-        toggleAudioBtn.text = if (isAudioEnabled) "Mute" else "Unmute"
-    }
-
-    override fun onPeerListUpdated(peers: Map<String, PeerRegistry.PeerInfo>) {
+    override fun onPeerListUpdated(peers: Map<String, PeerInfo>) {
         mainHandler.post {
             peerListLayout.removeAllViews()
             peers.forEach { (id, info) ->
                 val tv = TextView(this).apply {
-                    text = if (id == peerId) "[me]:$id" else "[online]:$id"
-                    setTextColor(if (id == peerId) 0xFF888888.toInt() else 0xFF00FF00.toInt())
+                    text = if (id == webRTCManager.getPeerId()) "[me]:$id" else "[online]:$id"
+                    setTextColor(if (id == webRTCManager.getPeerId()) 0xFF888888.toInt() else 0xFF00FF00.toInt())
                     textSize = 14f
                     setPadding(8, 4, 8, 4)
                     setOnClickListener { selectPeer(id) }
@@ -203,50 +198,20 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    private fun selectPeer(id: String) {
-        if (id == peerId) {
-            Toast.makeText(this, "Cannot call yourself", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        log("Calling $id...")
-        webRTCManager.close()
-        iceRestartAttempts = 0
-
-        targetPeerId = id
-        signalingClient.selectPeer(id)
-        isCaller = true
-
-        // Disable send button until connection is established
-        sendButton.isEnabled = false
-
-        startConnectionTimeout()
-
-        webRTCManager.createConnection(true) {
-            webRTCManager.createOffer { sdp ->
-                signalingClient.sendOffer(sdp.description)
-            }
-        }
-    }
-
     override fun onOfferReceived(from: String, sdp: String) {
         log("Incoming call from $from")
-
         targetPeerId = from
-        signalingClient.selectPeer(from)
+        webRTCManager.selectPeer(from)
         isCaller = false
         iceRestartAttempts = 0
-
-        // Disable send button until connection is established
         sendButton.isEnabled = false
-
         startConnectionTimeout()
 
         webRTCManager.createConnection(false) {
             val sessionDesc = SessionDescription(SessionDescription.Type.OFFER, sdp)
             webRTCManager.setRemoteDescription(sessionDesc) {
                 webRTCManager.createAnswer { answer ->
-                    signalingClient.sendAnswer(answer.description)
+                    webRTCManager.sendAnswer(answer.description)
                 }
             }
         }
@@ -258,7 +223,7 @@ class MainActivity : AppCompatActivity(),
         webRTCManager.setRemoteDescription(sessionDesc)
     }
 
-    override fun onIceCandidateReceived(from: String, candidate: SignalingClient.IceCandidateData) {
+    override fun onIceCandidateReceived(from: String, candidate: IceCandidateData) {
         webRTCManager.addIceCandidate(
             IceCandidate(candidate.sdpMid, candidate.sdpMLineIndex, candidate.candidate)
         )
@@ -268,11 +233,10 @@ class MainActivity : AppCompatActivity(),
         log("Online")
     }
 
-    override fun onError(error: Throwable) {
-        log("Error: ${error.message}")
+    override fun onConnectionLost(error: Throwable?) {
+        error?.let { log("Connection lost: ${it.message}") }
     }
 
-    // Enable send button for BOTH caller and callee when DataChannel opens
     override fun onDataChannelOpen() {
         cancelConnectionTimeout()
         mainHandler.post {
@@ -281,7 +245,6 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    // Disable send button for BOTH sides when DataChannel closes
     override fun onDataChannelClosed() {
         mainHandler.post {
             sendButton.isEnabled = false
@@ -306,9 +269,7 @@ class MainActivity : AppCompatActivity(),
                 }
                 PeerConnection.IceConnectionState.FAILED -> {
                     log("ICE Failed")
-                    if (!isCaller && iceRestartAttempts < 3) {
-                        iceRestartAttempts++
-                    }
+                    if (!isCaller && iceRestartAttempts < 3) iceRestartAttempts++
                 }
                 PeerConnection.IceConnectionState.DISCONNECTED -> {
                     log("ICE Disconnected")
@@ -319,24 +280,48 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    override fun onIceCandidate(candidate: IceCandidate) {
-        signalingClient.sendIceCandidate(candidate)
-    }
-
-    override fun onError(error: String) {
-        log("Error: $error")
-    }
-
-    override fun onLocalVideoTrack(track: VideoTrack) {
-        // Local video not displayed
-    }
-
     override fun onRemoteVideoTrack(track: VideoTrack) {
         log("Video started")
     }
 
     override fun onRemoteAudioTrack(track: AudioTrack) {
-        // Audio started
+        log("Audio started")
+    }
+
+    // ==================== UI ACTIONS ====================
+
+    private fun selectPeer(id: String) {
+        if (id == webRTCManager.getPeerId()) {
+            Toast.makeText(this, "Cannot call yourself", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        log("Calling $id...")
+        webRTCManager.close()
+        targetPeerId = id
+        webRTCManager.selectPeer(id)
+        isCaller = true
+        iceRestartAttempts = 0
+        sendButton.isEnabled = false
+        startConnectionTimeout()
+
+        webRTCManager.createConnection(true) {
+            webRTCManager.createOffer { sdp ->
+                webRTCManager.sendOffer(sdp.description)
+            }
+        }
+    }
+
+    private fun toggleVideo() {
+        isVideoEnabled = !isVideoEnabled
+        webRTCManager.toggleVideo(isVideoEnabled)
+        toggleVideoBtn.text = if (isVideoEnabled) "Video Off" else "Video On"
+    }
+
+    private fun toggleAudio() {
+        isAudioEnabled = !isAudioEnabled
+        webRTCManager.toggleAudio(isAudioEnabled)
+        toggleAudioBtn.text = if (isAudioEnabled) "Mute" else "Unmute"
     }
 
     private fun sendMessage() {
@@ -351,12 +336,47 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
+    private fun log(message: String) {
+        Log.d(tag, message)
+        mainHandler.post {
+            terminalOutput.append(message + "\n")
+            terminalScroll.post { terminalScroll.fullScroll(ScrollView.FOCUS_DOWN) }
+        }
+    }
+
+    private fun startConnectionTimeout() {
+        connectionTimeoutHandler?.removeCallbacksAndMessages(null)
+        connectionTimeoutHandler = Handler(Looper.getMainLooper())
+        connectionTimeoutHandler?.postDelayed({
+            if (!sendButton.isEnabled) {
+                log("Connection timeout")
+                if (iceRestartAttempts < 3) {
+                    iceRestartAttempts++
+                    webRTCManager.createConnection(isCaller) {
+                        if (isCaller) {
+                            webRTCManager.createOffer { sdp ->
+                                webRTCManager.sendOffer(sdp.description)
+                            }
+                        }
+                    }
+                } else {
+                    log("Connection failed")
+                }
+            }
+        }, 15000)
+    }
+
+    private fun cancelConnectionTimeout() {
+        connectionTimeoutHandler?.removeCallbacksAndMessages(null)
+        iceRestartAttempts = 0
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         cancelConnectionTimeout()
+        networkCheckHandler.removeCallbacksAndMessages(null)
         remoteVideoView.release()
         eglBase?.release()
         webRTCManager.cleanup()
-        signalingClient.destroy()
     }
 }
