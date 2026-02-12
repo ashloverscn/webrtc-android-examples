@@ -177,7 +177,7 @@ class MainActivity : AppCompatActivity(), WebRTCManager.WebRTCListener {
 
     // ==================== WEBRTC LISTENER CALLBACKS ====================
 
-    override fun onPeerListUpdated(peers: Map<String, PeerInfo>, myPeerId: String) {
+    override fun onPeerListUpdated(peers: Map<String, PeerStatus>, myPeerId: String) {
         mainHandler.post {
             peerListLayout.removeAllViews()
 
@@ -190,21 +190,29 @@ class MainActivity : AppCompatActivity(), WebRTCManager.WebRTCListener {
             }
             peerListLayout.addView(meTv)
 
-            // Add other peers below
-            peers.forEach { (id, info) ->
+            // Add other peers with online/offline status (matching HTML exactly)
+            peers.forEach { (id, status) ->
                 if (id == myPeerId) return@forEach // Skip self, already added at top
 
                 val tv = TextView(this).apply {
-                    text = "[online]:$id"
-                    setTextColor(0xFF00FF00.toInt())
+                    if (status.isOnline) {
+                        text = "[online]:$id"
+                        setTextColor(0xFF00FF00.toInt())
+                        setOnClickListener { selectPeer(id) }
+                    } else {
+                        text = "[disconnected]:$id"
+                        setTextColor(0xFF555555.toInt()) // Gray for disconnected
+                    }
                     textSize = 14f
                     setPadding(8, 4, 8, 4)
-                    setOnClickListener { selectPeer(id) }
                 }
-                if (id == targetPeerId) {
+
+                // Highlight selected peer only if online
+                if (id == targetPeerId && status.isOnline) {
                     tv.setTextColor(0xFFFFFF00.toInt())
                     tv.text = "[selected]:$id"
                 }
+
                 peerListLayout.addView(tv)
             }
             peerListScroll.post { peerListScroll.fullScroll(ScrollView.FOCUS_DOWN) }
