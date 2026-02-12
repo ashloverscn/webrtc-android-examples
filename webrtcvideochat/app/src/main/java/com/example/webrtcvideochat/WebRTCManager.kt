@@ -19,7 +19,12 @@ import javax.net.ssl.X509TrustManager
 
 // ==================== DATA CLASSES ====================
 
-data class PeerInfo(val id: String, val lastSeen: Long = System.currentTimeMillis())
+data class PeerStatus(
+    val id: String,
+    val lastSeen: Long = System.currentTimeMillis(),
+    var isOnline: Boolean = true
+)
+
 data class IceCandidateData(val sdpMid: String, val sdpMLineIndex: Int, val candidate: String)
 data class MqttConfig(
     val brokerUrl: String,
@@ -28,6 +33,83 @@ data class MqttConfig(
     val topic: String = "webrtc/signaling"
 )
 
+// ==================== PEER REGISTRY ====================
+
+class PeerRegistry {
+    private val peers = mutableMapOf<String, PeerStatus>()
+    private val listeners = mutableListOf<(Map<String, PeerStatus>) -> Unit>()
+    private val handler = Handler(Looper.getMainLooper())
+
+    // Timing constants matching HTML client exactly
+    companion object {
+        const val OFFLINE_THRESHOLD = 1000L  // Mark offline after 1 second
+        const val EXPIRE_THRESHOLD = 5000L   // Remove after 5 seconds
+    }
+
+    fun addListener(listener: (Map<String, PeerStatus>) -> Unit) {
+        listeners.add(listener)
+    }
+
+    fun update(peerId: String) {
+        val existing = peers[peerId]
+        val wasOnline = existing?.isOnline ?: false
+
+        peers[peerId] = PeerStatus(
+            id = peerId,
+            lastSeen = System.currentTimeMillis(),
+            isOnline = true
+        )
+
+        // Notify if new peer or was offline
+        if (!wasOnline) {
+            notifyListeners()
+        }
+    }
+
+    fun cleanup() {
+        val now = System.currentTimeMillis()
+        var changed = false
+
+        val iterator = peers.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            val elapsed = now - entry.value.lastSeen
+
+            when {
+                elapsed > EXPIRE_THRESHOLD -> {
+                    // Expired - remove completely (like HTML)
+                    iterator.remove()
+                    changed = true
+                    Log.d("PeerRegistry", "Expired and removed: ${entry.key}")
+                }
+                elapsed > OFFLINE_THRESHOLD && entry.value.isOnline -> {
+                    // Mark offline (like HTML "disconnected")
+                    entry.value.isOnline = false
+                    changed = true
+                    Log.d("PeerRegistry", "Marked offline: ${entry.key}")
+                }
+            }
+        }
+
+        if (changed) notifyListeners()
+    }
+
+    private fun notifyListeners() {
+        val currentPeers = peers.toMap()
+        handler.post { listeners.forEach { it(currentPeers) } }
+    }
+
+    fun startCleanup() {
+        // Run every 500ms for responsive updates
+        handler.postDelayed(object : Runnable {
+            override fun run() {
+                cleanup()
+                handler.postDelayed(this, 500)
+            }
+        }, 500)
+    }
+}
+
 // ==================== WEBRTC MANAGER ====================
 
 class WebRTCManager(
@@ -35,7 +117,7 @@ class WebRTCManager(
     private val listener: WebRTCListener
 ) {
     interface WebRTCListener {
-        fun onPeerListUpdated(peers: Map<String, PeerInfo>, myPeerId: String)
+        fun onPeerListUpdated(peers: Map<String, PeerStatus>, myPeerId: String)
         fun onOfferReceived(from: String, sdp: String)
         fun onAnswerReceived(from: String, sdp: String)
         fun onIceCandidateReceived(from: String, candidate: IceCandidateData)
@@ -54,6 +136,7 @@ class WebRTCManager(
     private var mqttClient: MqttClient? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var reconnectHandler = Handler(Looper.getMainLooper())
+    private var presenceHandler = Handler(Looper.getMainLooper())
     private var isMqttConnected = false
     private val reconnectDelay = 5000L
 
@@ -169,6 +252,7 @@ class WebRTCManager(
                         Log.e(tag, "MQTT connection lost", cause)
                         isMqttConnected = false
                         mainHandler.post { listener.onConnectionLost(cause) }
+                        stopPresenceLoop()
                         scheduleReconnect()
                     }
 
@@ -190,12 +274,8 @@ class WebRTCManager(
                 mqttClient?.subscribe(mqttConfig.topic)
                 isMqttConnected = true
 
-                // Send presence
-                val presence = JSONObject().apply {
-                    put("type", "presence")
-                    put("from", peerId)
-                }
-                publish(presence)
+                // Start presence loop immediately (every 1000ms like HTML)
+                startPresenceLoop()
 
                 mainHandler.post { listener.onConnected() }
                 Log.d(tag, "Connected to MQTT broker")
@@ -205,6 +285,27 @@ class WebRTCManager(
                 scheduleReconnect()
             }
         }.start()
+    }
+
+    private fun startPresenceLoop() {
+        presenceHandler.removeCallbacksAndMessages(null)
+        presenceHandler.post(object : Runnable {
+            override fun run() {
+                if (isMqttConnected) {
+                    val presence = JSONObject().apply {
+                        put("type", "presence")
+                        put("from", peerId)
+                    }
+                    publish(presence)
+                    Log.d(tag, "Sent presence")
+                }
+                presenceHandler.postDelayed(this, 1000) // Match HTML: 1000ms
+            }
+        })
+    }
+
+    private fun stopPresenceLoop() {
+        presenceHandler.removeCallbacksAndMessages(null)
     }
 
     private fun handleMqttMessage(json: JSONObject) {
@@ -567,6 +668,7 @@ class WebRTCManager(
     fun cleanup() {
         closeConnection()
         reconnectHandler.removeCallbacksAndMessages(null)
+        presenceHandler.removeCallbacksAndMessages(null)
         executor.execute {
             localVideoTrack?.dispose()
             localVideoTrack = null
@@ -591,44 +693,6 @@ class WebRTCManager(
         } catch (e: Exception) {
             Log.e(tag, "MQTT disconnect error", e)
         }
-    }
-}
-
-// ==================== HELPER CLASSES ====================
-
-class PeerRegistry {
-    private val peers = mutableMapOf<String, PeerInfo>()
-    private val listeners = mutableListOf<(Map<String, PeerInfo>) -> Unit>()
-    private val handler = Handler(Looper.getMainLooper())
-
-    fun addListener(listener: (Map<String, PeerInfo>) -> Unit) {
-        listeners.add(listener)
-    }
-
-    fun update(peerId: String) {
-        peers[peerId] = PeerInfo(peerId)
-        notifyListeners()
-    }
-
-    fun cleanup() {
-        val now = System.currentTimeMillis()
-        val expired = peers.filter { now - it.value.lastSeen > 5000 }.keys
-        expired.forEach { peers.remove(it) }
-        if (expired.isNotEmpty()) notifyListeners()
-    }
-
-    private fun notifyListeners() {
-        val currentPeers = peers.toMap()
-        handler.post { listeners.forEach { it(currentPeers) } }
-    }
-
-    fun startCleanup() {
-        handler.postDelayed(object : Runnable {
-            override fun run() {
-                cleanup()
-                handler.postDelayed(this, 1000)
-            }
-        }, 1000)
     }
 }
 
