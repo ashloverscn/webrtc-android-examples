@@ -15,7 +15,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
-        android:theme="@style/Theme.Webrtc">
+        android:theme="@style/Theme.Webrtcchat">
 
         <activity
             android:name=".MainActivity"
@@ -33,5 +33,6 @@
             android:exported="false" />
 
     </application>
+
 
 </manifest>
