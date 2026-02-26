@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GPS Pro Tracker | Enterprise Telemetry</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- MQTT -->
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+<!-- Chart.js for mini charts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+  --bg-primary: #020617;
+  --bg-secondary: #0f172a;
+  --bg-card: #1e293b;
+  --border: #334155;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --accent-blue: #3b82f6;
+  --accent-green: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-purple: #8b5cf6;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+}
+
+/* ===== HEADER ===== */
+header {
+  height: 64px;
+  background: linear-gradient(90deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-green));
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.logo-text {
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.logo-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+/* Status Panel */
+.status-panel {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  transition: all 0.3s ease;
+}
+
+.status-item.active {
+  border-color: var(--accent-green);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  position: relative;
+}
+
+.status-dot::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  animation: pulse-ring 2s infinite;
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+.dot-online { background: var(--accent-green); }
+.dot-online::after { border-color: var(--accent-green); }
+.dot-offline { background: var(--accent-red); }
+.dot-connecting { background: var(--accent-amber); }
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 60px;
+}
+
+.metric-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--accent-green);
+}
+
+.metric-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ===== MAIN LAYOUT ===== */
+main {
+  height: calc(100% - 64px);
+  display: flex;
+  position: relative;
+}
+
+/* ===== SIDEBAR ===== */
+.sidebar {
+  width: 320px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-section {
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Telemetry Cards */
+.tele-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.tele-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.tele-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.tele-card:hover::before {
+  opacity: 1;
+}
+
+.tele-card.active::before {
+  opacity: 1;
+}
+
+.tele-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.tele-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.tele-unit {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+
+.tele-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* Fix Quality Indicator */
+.fix-quality {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.fix-none { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); }
+.fix-gps { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); }
+.fix-dgps { background: rgba(59, 130, 246, 0.2); color: var(--accent-blue); }
+
+/* Mini Chart */
+.mini-chart {
+  height: 60px;
+  margin-top: 12px;
+}
+
+/* Satellite List */
+.sat-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.sat-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.sat-item:hover {
+  border-color: var(--border);
+  transform: translateX(4px);
+}
+
+.sat-item.used {
+  border-color: var(--accent-green);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.sat-prn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+}
+
+.sat-gps { background: var(--accent-blue); }
+.sat-glonass { background: var(--accent-red); }
+.sat-galileo { background: var(--accent-green); }
+.sat-beidou { background: var(--accent-amber); }
+
+.sat-info {
+  flex: 1;
+}
+
+.sat-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sat-detail {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.sat-signal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.signal-bar {
+  width: 40px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.signal-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-red), var(--accent-amber), var(--accent-green));
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.sat-dbn {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-secondary);
+  min-width: 35px;
+  text-align: right;
+}
+
+/* ===== MAP AREA ===== */
+.map-container {
+  flex: 1;
+  position: relative;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+  background: #e5e7eb;
+}
+
+/* Enhanced Map Controls */
+.map-controls {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 8px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.map-btn {
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.map-btn:hover {
+  background: var(--border);
+  color: var(--text-primary);
+  transform: scale(1.05);
+}
+
+.map-btn.active {
+  background: var(--accent-blue);
+  color: white;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
+}
+
+.map-btn:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Zoom Controls - Enhanced */
+.zoom-controls {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 8px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.zoom-btn {
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--text-secondary);
+  font-size: 24px;
+  font-weight: 300;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.zoom-btn:hover {
+  background: var(--border);
+  color: var(--text-primary);
+  transform: scale(1.1);
+}
+
+.zoom-level {
+  width: 44px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+/* Map Overlay */
+.map-overlay {
+  position: absolute;
+  top: 20px;
+  right: 90px;
+  z-index: 1000;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 20px;
+  min-width: 180px;
+  backdrop-filter: blur(10px);
+}
+
+.overlay-title {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.overlay-value {
+  font-size: 28px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.overlay-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* Coordinate Display */
+.coord-display {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  z-index: 1000;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  backdrop-filter: blur(10px);
+}
+
+.coord-row {
+  display: flex;
+  gap: 16px;
+}
+
+.coord-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.coord-value {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+/* Custom Marker */
+.gps-marker {
+  position: relative;
+}
+
+.gps-marker::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border: 2px solid var(--accent-green);
+  border-radius: 50%;
+  animation: marker-pulse 2s infinite;
+}
+
+@keyframes marker-pulse {
+  0% { transform: scale(0.5); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+/* Path Line */
+.gps-path {
+  filter: drop-shadow(0 0 4px var(--accent-blue));
+}
+
+/* Navigation Controls */
+.nav-controls {
+  position: absolute;
+  bottom: 100px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav-btn {
+  width: 44px;
+  height: 44px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  backdrop-filter: blur(10px);
+}
+
+.nav-btn:hover {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+  transform: scale(1.05);
+}
+
+/* ===== LOG PANEL ===== */
+.log-panel {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 400px;
+  max-height: 200px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  z-index: 1000;
+  backdrop-filter: blur(10px);
+  transform: translateY(calc(100% - 48px));
+  transition: transform 0.3s ease;
+}
+
+.log-panel.expanded {
+  transform: translateY(0);
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.log-title {
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-toggle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: transform 0.3s;
+}
+
+.log-panel.expanded .log-toggle {
+  transform: rotate(180deg);
+}
+
+.log-content {
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-y: auto;
+  max-height: 140px;
+}
+
+.log-line {
+  padding: 2px 0;
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+  margin: 2px 0;
+  color: var(--text-secondary);
+}
+
+.log-line:hover {
+  border-left-color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--text-primary);
+}
+
+.log-time { color: var(--accent-blue); }
+.log-nmea { color: var(--accent-amber); }
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Leaflet Customization */
+.leaflet-control-attribution {
+  background: var(--bg-card) !important;
+  color: var(--text-secondary) !important;
+  border-radius: 4px 0 0 0 !important;
+  font-size: 10px !important;
+  padding: 2px 8px !important;
+}
+
+.leaflet-control-attribution a {
+  color: var(--accent-blue) !important;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 280px;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+  .log-panel {
+    width: calc(100% - 40px);
+  }
+  .zoom-controls {
+    right: 10px;
+  }
+  .map-controls {
+    left: 10px;
+    top: 10px;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">📡</div>
+    <div>
+      <div class="logo-text">GPS Pro Tracker</div>
+      <div class="logo-sub">Enterprise Telemetry Dashboard</div>
+    </div>
+  </div>
+  
+  <div class="status-panel">
+    <div class="status-item" id="mqttStatus">
+      <div class="status-dot dot-offline" id="mqttDot"></div>
+      <span id="mqttText">MQTT</span>
+    </div>
+    <div class="status-item" id="gpsStatus">
+      <div class="status-dot dot-offline" id="gpsDot"></div>
+      <span id="gpsText">GPS</span>
+    </div>
+    <div class="metric">
+      <div class="metric-value" id="updateRate">0.0</div>
+      <div class="metric-label">Hz</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value" id="satCount">0</div>
+      <div class="metric-label">Sats</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <!-- Telemetry -->
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <span>📊</span> Telemetry
+      </div>
+      
+      <div class="tele-grid">
+        <div class="tele-card active" id="fixCard">
+          <div class="tele-label">Fix Quality</div>
+          <div>
+            <span class="fix-quality fix-none" id="fixQuality">NO FIX</span>
+          </div>
+          <div class="tele-sub" id="fixDetails">Waiting for data...</div>
+        </div>
+        
+        <div class="tele-card">
+          <div class="tele-label">Speed</div>
+          <div class="tele-value">
+            <span id="speed">--</span><span class="tele-unit">km/h</span>
+          </div>
+          <div class="tele-sub" id="speedKn">-- kn</div>
+        </div>
+        
+        <div class="tele-card">
+          <div class="tele-label">Altitude</div>
+          <div class="tele-value">
+            <span id="altitude">--</span><span class="tele-unit">m</span>
+          </div>
+          <div class="tele-sub">MSL</div>
+        </div>
+        
+        <div class="tele-card">
+          <div class="tele-label">Course</div>
+          <div class="tele-value">
+            <span id="course">--</span><span class="tele-unit">°</span>
+          </div>
+          <div class="tele-sub" id="courseName">--</div>
+        </div>
+      </div>
+      
+      <!-- HDOP Gauge -->
+      <div style="margin-top: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span class="tele-label">HDOP Precision</span>
+          <span style="font-size: 14px; font-weight: 600; color: var(--accent-blue);" id="hdopValue">--</span>
+        </div>
+        <div style="height: 8px; background: var(--border); border-radius: 4px; overflow: hidden;">
+          <div id="hdopBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-red), var(--accent-amber), var(--accent-green)); border-radius: 4px; transition: width 0.5s ease;"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-top: 4px; font-size: 10px; color: var(--text-secondary);">
+          <span>Poor</span>
+          <span>Good</span>
+          <span>Excellent</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Satellites -->
+    <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column;">
+      <div class="sidebar-title">
+        <span>🛰️</span> Active Satellites
+      </div>
+      <div class="sat-list" id="satList">
+        <div style="text-align: center; color: var(--text-secondary); padding: 20px; font-size: 12px;">
+          Waiting for satellite data...
+        </div>
+      </div>
+    </div>
+  </aside>
+  
+  <!-- Map -->
+  <div class="map-container">
+    <div id="map"></div>
+    
+    <!-- Layer Controls -->
+    <div class="map-controls">
+      <button class="map-btn active" id="btn-street" onclick="setLayer('street')" title="Street Map">🗺️</button>
+      <button class="map-btn" id="btn-satellite" onclick="setLayer('satellite')" title="Satellite">🛰️</button>
+      <button class="map-btn" id="btn-terrain" onclick="setLayer('terrain')" title="Terrain">⛰️</button>
+      <button class="map-btn" onclick="centerPosition()" title="Center Position">📍</button>
+      <button class="map-btn" onclick="clearTrack()" title="Clear Track">🗑️</button>
+    </div>
+    
+    <!-- Zoom Controls -->
+    <div class="zoom-controls">
+      <button class="zoom-btn" onclick="zoomIn()" title="Zoom In">+</button>
+      <div class="zoom-level" id="zoomLevel">2</div>
+      <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out">−</button>
+    </div>
+    
+    <!-- Map Overlay -->
+    <div class="map-overlay">
+      <div class="overlay-title">Position Accuracy</div>
+      <div class="overlay-value" id="accuracyValue">--</div>
+      <div class="overlay-sub" id="accuracyDetail">HDOP: -- | -- sats used</div>
+    </div>
+    
+    <!-- Coordinates -->
+    <div class="coord-display">
+      <div class="coord-row">
+        <div>
+          <div class="coord-label">Latitude</div>
+          <div class="coord-value" id="latDisplay">--</div>
+        </div>
+        <div>
+          <div class="coord-label">Longitude</div>
+          <div class="coord-value" id="lonDisplay">--</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Log Panel -->
+    <div class="log-panel" id="logPanel">
+      <div class="log-header" onclick="toggleLog()">
+        <div class="log-title">
+          <span>📡</span> NMEA Stream
+        </div>
+        <div class="log-toggle">▼</div>
+      </div>
+      <div class="log-content" id="logContent">
+        <!-- Logs appear here -->
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ================= CONFIGURATION ================= */
+const CONFIG = {
+  broker: 'wss://324fe28c17b24e76a2e94df596af2aef.s1.eu.hivemq.cloud:8884/mqtt',
+  topic: 'gps/demo/nmea',
+  username: 'admin',
+  password: 'admin1234S',
+  clientId: 'gps-pro-' + Math.random().toString(36).substr(2, 9)
+};
+
+/* ================= STATE ================= */
+let map, marker, pathLine, currentLayer;
+let pathCoords = [];
+let lastPos = null;
+let updateCount = 0;
+let satellites = {};
+let client;
+
+/* ================= NMEA PARSER ================= */
+const parser = {
+  lat: 0, lon: 0, alt: 0, speed: 0, course: 0,
+  fixQ: 0, satsUsed: 0, hdop: 0, time: '', mode: 'N',
+  
+  parse(sentence) {
+    if (!sentence || !sentence.startsWith('$')) return false;
+    
+    const parts = sentence.split(',');
+    const type = parts[0].substring(1);
+    
+    switch(type) {
+      case 'GNGGA':
+      case 'GPGGA':
+        this.parseGGA(parts);
+        break;
+      case 'GNRMC':
+      case 'GPRMC':
+        this.parseRMC(parts);
+        break;
+      case 'GNGSA':
+      case 'GPGSA':
+        this.parseGSA(parts);
+        break;
+      case 'GNGSV':
+      case 'GPGSV':
+      case 'GLGSV':
+      case 'GAGSV':
+      case 'GBGSV':
+        this.parseGSV(parts, type);
+        break;
+    }
+    return true;
+  },
+  
+  parseGGA(p) {
+    if (p.length < 15) return;
+    
+    if (p[1]) this.time = p[1].substr(0,2) + ':' + p[1].substr(2,2) + ':' + p[1].substr(4,2);
+    
+    if (p[2] && p[3]) {
+      const d = parseFloat(p[2].substr(0,2));
+      const m = parseFloat(p[2].substr(2));
+      this.lat = d + m/60;
+      if (p[3] === 'S') this.lat = -this.lat;
+    }
+    
+    if (p[4] && p[5]) {
+      const d = parseFloat(p[4].substr(0,3));
+      const m = parseFloat(p[4].substr(3));
+      this.lon = d + m/60;
+      if (p[5] === 'W') this.lon = -this.lon;
+    }
+    
+    this.fixQ = parseInt(p[6]) || 0;
+    this.satsUsed = parseInt(p[7]) || 0;
+    this.hdop = parseFloat(p[8]) || 0;
+    this.alt = parseFloat(p[9]) || 0;
+  },
+  
+  parseRMC(p) {
+    if (p.length < 12) return;
+    this.speed = parseFloat(p[7]) || 0;
+    this.course = parseFloat(p[8]) || 0;
+  },
+  
+  parseGSA(p) {
+    if (p.length < 18) return;
+    this.mode = p[2] || 'N';
+    this.pdop = parseFloat(p[15]) || 0;
+    this.hdop = parseFloat(p[16]) || 0;
+    this.vdop = parseFloat(p[17]) || 0;
+    
+    for (let i = 3; i <= 14; i++) {
+      if (p[i]) {
+        Object.values(satellites).forEach(s => {
+          if (s.prn === p[i]) s.used = true;
+        });
+      }
+    }
+  },
+  
+  parseGSV(p, type) {
+    if (p.length < 4) return;
+    
+    let sys = 'GPS';
+    if (type.startsWith('GL')) sys = 'GLONASS';
+    else if (type.startsWith('GA')) sys = 'Galileo';
+    else if (type.startsWith('GB') || type.startsWith('BD')) sys = 'BeiDou';
+    else if (type.startsWith('GQ')) sys = 'QZSS';
+    
+    for (let i = 4; i < p.length - 1; i += 4) {
+      if (p[i]) {
+        const key = sys + '-' + p[i];
+        satellites[key] = {
+          prn: p[i],
+          sys: sys,
+          el: parseInt(p[i+1]) || 0,
+          az: parseInt(p[i+2]) || 0,
+          snr: parseInt(p[i+3]) || 0,
+          used: satellites[key]?.used || false
+        };
+      }
+    }
+  }
+};
+
+/* ================= INITIALIZATION ================= */
+function init() {
+  initMap();
+  connectMQTT();
+  setInterval(() => {
+    const rate = (updateCount / 2).toFixed(1);
+    document.getElementById('updateRate').textContent = rate;
+    updateCount = 0;
+  }, 2000);
+  log('System', 'GPS Pro Tracker initialized');
+}
+
+function initMap() {
+  map = L.map('map', {
+    zoomControl: false,
+    attributionControl: true,
+    minZoom: 2,
+    maxZoom: 19,
+    preferCanvas: true,
+    zoomAnimation: true,
+    fadeAnimation: true,
+    markerZoomAnimation: true,
+    wheelPxPerZoomLevel: 60,
+    wheelDebounceTime: 40
+  }).setView([0, 0], 2);
+  
+  // Layer definitions - REMOVED dark/night mode
+  const layers = {
+    street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      subdomains: 'abc',
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }),
+    satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: '© Esri'
+    }),
+    terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      subdomains: 'abc',
+      maxZoom: 17,
+      attribution: '© OpenTopoMap'
+    })
+  };
+  
+  // Default to street view (no more night mode)
+  currentLayer = layers.street;
+  currentLayer.addTo(map);
+  map.layers = layers;
+  
+  // Update zoom level display
+  map.on('zoomend', () => {
+    document.getElementById('zoomLevel').textContent = map.getZoom();
+  });
+  
+  // Smooth wheel zoom
+  map.scrollWheelZoom.enable();
+  
+  // Custom marker
+  const icon = L.divIcon({
+    className: 'gps-marker',
+    html: '<div style="width:16px;height:16px;background:var(--accent-green);border:2px solid white;border-radius:50%;box-shadow:0 0 10px var(--accent-green);position:relative;z-index:1000;"></div>',
+    iconSize: [16, 16],
+    iconAnchor: [8, 8]
+  });
+  
+  marker = L.marker([0, 0], { icon: icon, opacity: 0 }).addTo(map);
+  
+  // Path with glow
+  pathLine = L.polyline([], {
+    color: '#3b82f6',
+    weight: 3,
+    opacity: 0.8,
+    className: 'gps-path'
+  }).addTo(map);
+  
+  // Handle resize
+  window.addEventListener('resize', () => {
+    setTimeout(() => map.invalidateSize(), 100);
+  });
+  
+  // Keyboard navigation
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT') return;
+    
+    switch(e.key) {
+      case '+':
+      case '=':
+        zoomIn();
+        break;
+      case '-':
+      case '_':
+        zoomOut();
+        break;
+      case 'c':
+      case 'C':
+        centerPosition();
+        break;
+      case '0':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          map.setZoom(2);
+        }
+        break;
+    }
+  });
+}
+
+/* ================= MAP CONTROLS ================= */
+function setLayer(type) {
+  if (!map.layers[type]) return;
+  
+  // Update button states
+  document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-' + type).classList.add('active');
+  
+  // Smooth layer transition
+  map.removeLayer(currentLayer);
+  currentLayer = map.layers[type];
+  currentLayer.addTo(map);
+  currentLayer.bringToBack();
+  
+  // Refresh path and marker to ensure they're visible
+  if (pathLine) pathLine.bringToFront();
+  if (marker) marker.setZIndexOffset(1000);
+  
+  log('Map', `Switched to ${type} view`);
+}
+
+function zoomIn() {
+  map.zoomIn(1, { animate: true, duration: 0.5 });
+}
+
+function zoomOut() {
+  map.zoomOut(1, { animate: true, duration: 0.5 });
+}
+
+function centerPosition() {
+  if (lastPos) {
+    map.flyTo(lastPos, 17, { 
+      animate: true, 
+      duration: 1.5,
+      easeLinearity: 0.25
+    });
+    log('Map', 'Centered on current position');
+  }
+}
+
+function clearTrack() {
+  pathCoords = [];
+  pathLine.setLatLngs([]);
+  log('Map', 'Track cleared');
+}
+
+function toggleLog() {
+  document.getElementById('logPanel').classList.toggle('expanded');
+}
+
+/* ================= MQTT ================= */
+function connectMQTT() {
+  setStatus('mqtt', 'connecting');
+  
+  client = mqtt.connect(CONFIG.broker, {
+    clientId: CONFIG.clientId,
+    username: CONFIG.username,
+    password: CONFIG.password,
+    clean: true,
+    reconnectPeriod: 5000,
+    connectTimeout: 10000
+  });
+  
+  client.on('connect', () => {
+    setStatus('mqtt', 'online');
+    log('MQTT', 'Connected to broker');
+    client.subscribe(CONFIG.topic);
+  });
+  
+  client.on('message', (topic, payload) => {
+    const nmea = payload.toString().trim();
+    if (!nmea) return;
+    
+    updateCount++;
+    log(nmea);
+    
+    if (parser.parse(nmea)) {
+      updateUI();
+    }
+  });
+  
+  client.on('error', (err) => {
+    log('MQTT', `Error: ${err.message}`);
+    setStatus('mqtt', 'offline');
+  });
+  
+  client.on('offline', () => {
+    setStatus('mqtt', 'offline');
+  });
+  
+  client.on('reconnect', () => {
+    setStatus('mqtt', 'connecting');
+  });
+}
+
+/* ================= UI UPDATES ================= */
+function updateUI() {
+  const d = parser;
+  
+  // Fix Quality
+  const qualities = ['None', 'GPS', 'DGPS', 'PPS', 'RTK Fixed', 'RTK Float', 'Est', 'Manual', 'Sim'];
+  const fixText = qualities[d.fixQ] || 'Unknown';
+  const fixClass = d.fixQ === 0 ? 'fix-none' : d.fixQ === 1 ? 'fix-gps' : 'fix-dgps';
+  
+  document.getElementById('fixQuality').textContent = fixText;
+  document.getElementById('fixQuality').className = `fix-quality ${fixClass}`;
+  document.getElementById('fixDetails').textContent = `${d.satsUsed} satellites used • ${d.time || '--:--:--'}`;
+  document.getElementById('fixCard').classList.toggle('active', d.fixQ > 0);
+  
+  // GPS Status
+  setStatus('gps', d.fixQ > 0 ? 'online' : 'offline');
+  
+  // Position
+  if (d.lat && d.lon) {
+    document.getElementById('latDisplay').textContent = Math.abs(d.lat).toFixed(6) + '° ' + (d.lat >= 0 ? 'N' : 'S');
+    document.getElementById('lonDisplay').textContent = Math.abs(d.lon).toFixed(6) + '° ' + (d.lon >= 0 ? 'E' : 'W');
+    
+    // Update map
+    const pos = [d.lat, d.lon];
+    pathCoords.push(pos);
+    if (pathCoords.length > 100) pathCoords.shift();
+    
+    marker.setLatLng(pos);
+    marker.setOpacity(1);
+    pathLine.setLatLngs(pathCoords);
+    
+    if (!lastPos) {
+      map.flyTo(pos, 17, { animate: true, duration: 1.5 });
+    }
+    
+    lastPos = pos;
+  }
+  
+  // Speed
+  const speedKmh = d.speed * 1.852;
+  document.getElementById('speed').textContent = speedKmh.toFixed(1);
+  document.getElementById('speedKn').textContent = d.speed.toFixed(1) + ' knots';
+  
+  // Altitude
+  document.getElementById('altitude').textContent = d.alt.toFixed(1);
+  
+  // Course
+  document.getElementById('course').textContent = d.course.toFixed(0);
+  document.getElementById('courseName').textContent = getDirection(d.course);
+  
+  // HDOP
+  document.getElementById('hdopValue').textContent = d.hdop.toFixed(1);
+  const hdopPercent = Math.min((d.hdop / 5) * 100, 100);
+  document.getElementById('hdopBar').style.width = hdopPercent + '%';
+  
+  // Accuracy overlay
+  const accuracy = d.hdop < 1 ? '< 1m' : d.hdop < 2 ? '~2m' : d.hdop < 5 ? '~5m' : '>10m';
+  document.getElementById('accuracyValue').textContent = accuracy;
+  document.getElementById('accuracyDetail').textContent = `HDOP: ${d.hdop.toFixed(1)} | ${d.satsUsed}/${Object.keys(satellites).length} sats`;
+  
+  // Satellites
+  updateSatellites();
+}
+
+function updateSatellites() {
+  const arr = Object.values(satellites);
+  const used = arr.filter(s => s.used).length;
+  
+  document.getElementById('satCount').textContent = used;
+  
+  const list = document.getElementById('satList');
+  const sorted = arr.sort((a, b) => b.snr - a.snr);
+  
+  list.innerHTML = sorted.map(s => {
+    const sysClass = s.sys === 'GPS' ? 'sat-gps' : 
+                    s.sys === 'GLONASS' ? 'sat-glonass' : 
+                    s.sys === 'Galileo' ? 'sat-galileo' : 'sat-beidou';
+    
+    return `
+      <div class="sat-item ${s.used ? 'used' : ''}">
+        <div class="sat-prn ${sysClass}">${s.prn}</div>
+        <div class="sat-info">
+          <div class="sat-name">${s.sys} ${s.used ? '●' : '○'}</div>
+          <div class="sat-detail">El: ${s.el}° Az: ${s.az}°</div>
+        </div>
+        <div class="sat-signal">
+          <div class="signal-bar">
+            <div class="signal-fill" style="width: ${Math.min(s.snr * 2, 100)}%"></div>
+          </div>
+          <div class="sat-dbn">${s.snr}dB</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* ================= HELPERS ================= */
+function getDirection(deg) {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+function setStatus(type, state) {
+  const dot = document.getElementById(type + 'Dot');
+  const text = document.getElementById(type + 'Text');
+  const item = document.getElementById(type + 'Status');
+  
+  const states = {
+    online: { cls: 'dot-online', txt: type === 'mqtt' ? 'MQTT' : 'GPS 3D' },
+    connecting: { cls: 'dot-connecting', txt: 'Connecting' },
+    offline: { cls: 'dot-offline', txt: type === 'mqtt' ? 'MQTT' : 'No Fix' }
+  };
+  
+  const s = states[state];
+  dot.className = 'status-dot ' + s.cls;
+  text.textContent = s.txt;
+  item.classList.toggle('active', state === 'online');
+}
+
+function log(nmea) {
+  const container = document.getElementById('logContent');
+  const time = new Date().toLocaleTimeString('en-US', {hour12:false, fractionalSecondDigits:3});
+  const type = nmea.substring(3, 6);
+  
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-nmea">${type}</span> ${nmea.substring(0, 40)}${nmea.length > 40 ? '...' : ''}`;
+  
+  container.appendChild(line);
+  container.scrollTop = container.scrollHeight;
+  
+  // Keep last 20 lines
+  while (container.children.length > 20) {
+    container.removeChild(container.firstChild);
+  }
+}
+
+/* ================= START ================= */
+window.onload = init;
+</script>
+
+</body>
+</html>
