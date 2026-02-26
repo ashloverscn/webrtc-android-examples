@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scrollView"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="#F5F5F5">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="GPS NMEA Tracker (Background Service)"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#1976D2"
+            android:gravity="center"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:id="@+id/txtStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="MQTT: DISCONNECTED\nGPS: INACTIVE"
+            android:textSize="14sp"
+            android:textColor="#333"
+            android:background="#FFFFFF"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/txtAccuracy"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Accuracy: --\nSpeed: --\nAltitude: --\nBearing: --\nProvider: --"
+            android:textSize="12sp"
+            android:textColor="#555"
+            android:background="#FFFFFF"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:minLines="5" />
+
+        <TextView
+            android:id="@+id/txtNmea"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Waiting for NMEA..."
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:textColor="#0066CC"
+            android:background="#F0F8FF"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:minLines="2" />
+
+        <TextView
+            android:id="@+id/txtVerbose"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:text=""
+            android:textSize="10sp"
+            android:fontFamily="monospace"
+            android:textColor="#444"
+            android:background="#FAFAFA"
+            android:padding="8dp"
+            android:scrollbars="vertical"
+            android:maxLines="20" />
+
+        <Button
+            android:id="@+id/btnStartStop"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="Start Tracking"
+            android:textSize="16sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#4CAF50"
+            android:layout_marginTop="16dp" />
+
+    </LinearLayout>
+</ScrollView>
